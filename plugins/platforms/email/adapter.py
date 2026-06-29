@@ -1273,11 +1273,17 @@ async def _standalone_send(
     force_document=False,
 ):
     """Out-of-process Email delivery via SMTP (one-shot). Implements the
-    standalone_sender_fn contract; replaces the legacy _send_email helper."""
+    standalone_sender_fn contract; replaces the legacy _send_email helper.
+
+    Sends multipart/alternative with plain text + HTML (when markdown is
+    available). Uses the same inline CSS styling as the adapter class.
+    """
     import smtplib
+    import socket
     import ssl as _ssl
     from email.mime.text import MIMEText
     from email.utils import formatdate
+    from email.mime.multipart import MIMEMultipart as _MIMEMultipart
 
     extra = getattr(pconfig, "extra", {}) or {}
     address = extra.get("address") or os.getenv("EMAIL_ADDRESS", "")
@@ -1292,14 +1298,52 @@ async def _standalone_send(
         return {"error": "Email not configured (EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_SMTP_HOST required)"}
 
     try:
-        msg = MIMEText(message, "plain", "utf-8")
+        msg = _MIMEMultipart()
         msg["From"] = address
         msg["To"] = chat_id
         msg["Subject"] = "Hermes Agent"
         msg["Date"] = formatdate(localtime=True)
 
-        server = smtplib.SMTP(smtp_host, smtp_port)
-        server.starttls(context=_ssl.create_default_context())
+        alt = _MIMEMultipart("alternative")
+        alt.attach(MIMEText(message, "plain", "utf-8"))
+
+        try:
+            import markdown
+            html_body = markdown.markdown(
+                message, extensions=["tables", "fenced_code", "nl2br"]
+            )
+            html_body = _style_html_email(_HTML_PREFIX + html_body + _HERMES_EMAIL_FOOTER)
+            alt.attach(MIMEText(html_body, "html", "utf-8"))
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        msg.attach(alt)
+
+        ctx = _ssl.create_default_context()
+
+        def _connect(*, ipv4_only: bool = False):
+            """Attempt one SMTP connection with correct protocol for port."""
+            if smtp_port == 465:
+                smtp_cls = _IPv4SMTP_SSL if ipv4_only else smtplib.SMTP_SSL
+                return smtp_cls(smtp_host, smtp_port, timeout=SMTP_CONNECT_TIMEOUT, context=ctx)
+            smtp_cls = _IPv4SMTP if ipv4_only else smtplib.SMTP
+            s = smtp_cls(smtp_host, smtp_port, timeout=SMTP_CONNECT_TIMEOUT)
+            try:
+                s.starttls(context=ctx)
+            except Exception:
+                s.close()
+                raise
+            return s
+
+        try:
+            server = _connect()
+        except (socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
+            if isinstance(exc, _ssl.SSLError):
+                raise
+            server = _connect(ipv4_only=True)
+
         server.login(address, password)
         server.send_message(msg)
         server.quit()
@@ -1342,7 +1386,7 @@ def register(ctx) -> None:
         allow_all_env="EMAIL_ALLOW_ALL_USERS",
         cron_deliver_env_var="EMAIL_HOME_ADDRESS",
         standalone_sender_fn=_standalone_send,
-        max_message_length=50_000,
+        max_message_length=200_000,
         pii_safe=True,
         emoji="📧",
         allow_update_command=True,
