@@ -34,7 +34,12 @@ def _stat(pattern: Any, tool: str = "?") -> None:
     """Emit a repair stat event.  No-op when stats module is unavailable."""
     if _record_repair is not None:
         try:
-            _record_repair(pattern, tool, _get_model() if _get_model else "unknown")
+            # Resolve string pattern names to RepairPattern enums for
+            # consistent counting (prevents typos / mismatched keys).
+            rp_pattern = pattern
+            if _RP is not None and isinstance(pattern, str):
+                rp_pattern = _RP(pattern)
+            _record_repair(rp_pattern, tool, _get_model() if _get_model else "unknown")
         except Exception:
             pass
 logger = logging.getLogger(__name__)
@@ -271,7 +276,7 @@ def _repair_tool_call_arguments(raw_args: str, tool_name: str = "?") -> str:
             "Repaired malformed tool_call arguments for %s: %s → %s",
             tool_name, raw_stripped[:80], fixed[:80],
         )
-        _stat("trailing_comma", tool_name)
+        _stat("malformed_json_repair", tool_name)
         return fixed
     except json.JSONDecodeError:
         pass
@@ -299,7 +304,7 @@ def _repair_tool_call_arguments(raw_args: str, tool_name: str = "?") -> str:
         "replaced with empty object (was: %s)",
         tool_name, raw_stripped[:80],
     )
-    _stat("unrepairable", tool_name)
+    _stat(_RP.UNREPAIRABLE, tool_name)
     return "{}"
 
 

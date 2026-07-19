@@ -36,6 +36,7 @@ class RepairPattern(str, Enum):
     UNCLOSED_BRACKET = "unclosed_bracket"        # Unclosed {}/[]
     TRAILING_CONTENT = "trailing_content"        # Complete JSON + extra prose
     DOUBLE_SERIALIZE = "double_serialize"        # JSON string wrapping JSON object
+    MALFORMED_JSON_REPAIR = "malformed_json_repair"  # Generic JSON syntax repair (trailing comma / unclosed bracket / excess braces)
     UNREPAIRABLE = "unrepairable"                # Last resort → {}
 
     # Type coercion repairs (model_tools.py coerce_tool_args)
@@ -127,7 +128,8 @@ class ToolRepairStats:
                     for e in self._events:
                         v = e.pattern if isinstance(e.pattern, str) else getattr(e.pattern, "value", str(e.pattern))
                         self._model_counts[e.model_name][v] += 1
-                self._model_counts[model_name][pat_value] += 1
+                else:
+                    self._model_counts[model_name][pat_value] += 1
         except Exception:
             # Observability must NEVER break the repair pipeline.
             pass
