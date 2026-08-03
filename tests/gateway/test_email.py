@@ -85,6 +85,18 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertNotIn("<p>", result)
         self.assertNotIn("<b>", result)
 
+    def test_strip_html_entities(self):
+        from plugins.platforms.email.adapter import _strip_html
+        html = "<p>a &amp; b</p>"
+        result = _strip_html(html)
+        self.assertIn("a & b", result)
+
+    def test_strip_html_does_not_double_decode_entities(self):
+        from plugins.platforms.email.adapter import _strip_html
+        html = "The token is &amp;lt;APIKEY&amp;gt;"
+        result = _strip_html(html)
+        self.assertEqual(result, "The token is &lt;APIKEY&gt;")
+
 
 class TestExtractTextBody(unittest.TestCase):
     """Test email body extraction from different message formats."""
